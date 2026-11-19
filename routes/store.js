@@ -41,12 +41,10 @@ router.get("/", verifyToken, async (req, res) => {
 router.post("/", verifyToken, requirePermission("store"), async (req, res) => {
   try {
     const { serialNumber, partNumber, machinePart, machine, quantity, clientId } = req.body;
-    if (!serialNumber || !partNumber || !machinePart || !machine || quantity === undefined) {
-      return res.status(400).json({ message: "All fields are required." });
+    if (!serialNumber || !machinePart || !machine || quantity === undefined) {
+      return res.status(400).json({ message: "Serial number, description, machine and quantity are required." });
     }
-    const duplicate = await StoreItem.findOne({
-      serialNumber: new RegExp(`^${serialNumber}$`, "i"),
-    });
+    const duplicate = await StoreItem.findOne({ serialNumber: exactCI(serialNumber) });
     if (duplicate) {
       return res.status(409).json({ message: "A part with this serial number already exists." });
     }
@@ -58,7 +56,7 @@ router.post("/", verifyToken, requirePermission("store"), async (req, res) => {
     }
     const item = await StoreItem.create({
       serialNumber,
-      partNumber,
+      partNumber: typeof partNumber === "string" ? partNumber : "",
       machinePart,
       machine,
       quantity: Number(quantity),
@@ -71,8 +69,8 @@ router.post("/", verifyToken, requirePermission("store"), async (req, res) => {
 });
 
 // ── POST /store/bulk -import many parts at once (Excel / CSV import) ─────────
-// Body: { items: [{ serialNumber, partNumber, machinePart, machine, quantity, client? }] }
-// `client` is optional: a client id or exact company name.
+// Body: { items: [{ serialNumber, partNumber?, machinePart, machine, quantity, client? }] }
+// `partNumber` and `client` are optional: a client id or exact company name.
 // Max 500 items per request. If any entry is invalid or already exists, nothing
 // is saved and the message names the entry. Declared before the /:id routes.
 // Does not touch the owed ledger: an administrator settles from the Store page.
@@ -102,10 +100,12 @@ router.post("/bulk", verifyToken, requirePermission("store"), async (req, res) =
         return res.status(400).json({ message: `${label}: must be an object.` });
       }
       const serialNumber = cleanText(it.serialNumber, 100);
-      const partNumber = cleanText(it.partNumber, 100);
+      // optional: blank is fine, but if given it must fit
+      const rawPart = typeof it.partNumber === "string" || typeof it.partNumber === "number" ? String(it.partNumber).trim() : "";
+      if (rawPart.length > 100) return res.status(400).json({ message: `${label}: part number must be 100 characters or less.` });
+      const partNumber = rawPart;
       const machinePart = cleanText(it.machinePart, 200);
       if (!serialNumber) return res.status(400).json({ message: `${label}: serial number is required (max 100 characters).` });
-      if (!partNumber) return res.status(400).json({ message: `${label}: part number is required (max 100 characters).` });
       if (!machinePart) return res.status(400).json({ message: `${label}: description is required (max 200 characters).` });
 
       const machine = canonicalMachine(it.machine);

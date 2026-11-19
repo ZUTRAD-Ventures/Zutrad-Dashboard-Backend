@@ -22,12 +22,6 @@ const SupplySchema = new mongoose.Schema(
   {
     goodsSupplied: { type: String, required: true, trim: true },
     serialNumber:  { type: String, required: true, trim: true },
-    partNumber: {
-      type: String,
-      required: true,
-      trim: true,
-      set: (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
-    },
     quantity:      { type: Number, required: true, min: 1 },
     supplyDate:    { type: Date,   required: true },
     client: {

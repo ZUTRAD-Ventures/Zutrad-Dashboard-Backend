@@ -1,8 +1,10 @@
 // Small helpers shared by the store, supply and schedule routes.
 
-// "pr-1001 " and "PR-1001" are the same part. The store, the supply log and the
-// owed ledger all save part numbers in this form so they always line up.
-export const normalizePart = (value) => String(value ?? "").trim().toUpperCase();
+// "sn-1001 " and "SN-1001" are the same item. The owed ledger saves serial
+// numbers in this form so it always lines up with the store.
+export const normalizeSerial = (value) => String(value ?? "").trim().toUpperCase();
+// Kept so older imports keep working; same behaviour as normalizeSerial.
+export const normalizePart = normalizeSerial;
 
 export const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
