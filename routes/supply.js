@@ -8,7 +8,7 @@ import Supply from "../models/Supply.js";
 import StoreItem from "../models/StoreItem.js";
 import Client from "../models/Client.js";
 import SupplyLedger from "../models/SupplyLedger.js";
-import { normalizePart, exactCI, isObjectIdString, withId } from "../utils/normalize.js";
+import { normalizeSerial, exactCI, isObjectIdString, withId } from "../utils/normalize.js";
 import { verifyToken, requirePermission, requireAdmin, requireSuperAdmin, requireAnyPermission } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -77,7 +77,7 @@ const populateSupply = (query) =>
     .populate("user",   "firstName surname")
     .populate("client", "companyName")
     .populate("takenFrom", "companyName")
-    .populate("storeItem", "machinePart partNumber serialNumber quantity");
+    .populate("storeItem", "machinePart serialNumber quantity");
 
 // Plain object with `id` added next to `_id` on client / takenFrom (the table
 // reads both). takenFrom is null when stock did not come from another client.
@@ -90,10 +90,10 @@ const serializeSupply = (row) => ({
 const canRecordTransfers = (req) =>
   req.userRole === "administrator" || req.userRole === "superadmin";
 
-// Sum of qtyChange for one client + part. Negative means we owe that client.
-const ledgerTotal = async (clientId, part) => {
+// Sum of qtyChange for one client + serial number. Negative means we owe that client.
+const ledgerTotal = async (clientId, serial) => {
   const [row] = await SupplyLedger.aggregate([
-    { $match: { client: clientId, partNumber: part } },
+    { $match: { client: clientId, serialNumber: serial } },
     { $group: { _id: null, total: { $sum: "$qtyChange" } } },
   ]);
   return row ? row.total : 0;
@@ -111,7 +111,7 @@ const reverseTransfers = async (supplyIds, userId) => {
     .filter((r) => !done.has(String(r.relatedSupply)))
     .map((r) => ({
       client: r.client,
-      partNumber: r.partNumber,
+      serialNumber: r.serialNumber,
       goodsSupplied: r.goodsSupplied,
       qtyChange: Math.abs(r.qtyChange),
       type: "reversed",
@@ -202,7 +202,7 @@ router.get("/owed", verifyToken, requireAnyPermission(["supply", "store"]), asyn
       { $sort: { createdAt: 1 } }, // so $last is the most recent description
       {
         $group: {
-          _id: { client: "$client", partNumber: "$partNumber" },
+          _id: { client: "$client", serialNumber: "$serialNumber" },
           total: { $sum: "$qtyChange" },
           goodsSupplied: { $last: "$goodsSupplied" },
           lastTakenAt: { $max: { $cond: [{ $eq: ["$type", "borrowed_out"] }, "$createdAt", null] } },
@@ -213,7 +213,7 @@ router.get("/owed", verifyToken, requireAnyPermission(["supply", "store"]), asyn
         $project: {
           _id: 0,
           client: "$_id.client",
-          partNumber: "$_id.partNumber",
+          serialNumber: "$_id.serialNumber",
           goodsSupplied: 1,
           lastTakenAt: 1,
           owed: { $multiply: ["$total", -1] },
@@ -231,16 +231,16 @@ router.get("/owed", verifyToken, requireAnyPermission(["supply", "store"]), asyn
 });
 
 // ── POST /supply/owed/repay -record that owed stock was replaced ────────────
-// Body: { clientId, partNumber, quantity, note }. Administrators and
+// Body: { clientId, serialNumber, quantity, note }. Administrators and
 // superadmins only. Does NOT change store quantity (the Store page does that).
 router.post("/owed/repay", verifyToken, requireAdmin, async (req, res) => {
   try {
-    const { clientId, partNumber, quantity, note } = req.body ?? {};
-    const part = normalizePart(partNumber);
+    const { clientId, serialNumber, quantity, note } = req.body ?? {};
+    const serial = normalizeSerial(serialNumber);
     const qty = Number(quantity);
     const cleanNote = String(note ?? "").trim();
 
-    if (!clientId || !part) return res.status(400).json({ message: "Client and part number are required." });
+    if (!clientId || !serial) return res.status(400).json({ message: "Client and serial number are required." });
     if (quantity === "" || quantity === null || !Number.isFinite(qty) || qty <= 0) {
       return res.status(400).json({ message: "Enter a quantity above 0." });
     }
@@ -253,14 +253,14 @@ router.post("/owed/repay", verifyToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: "Client not found." });
     }
 
-    const owed = -(await ledgerTotal(client, part));
-    if (owed <= 0) return res.status(400).json({ message: "Nothing is owed to this client for that part." });
+    const owed = -(await ledgerTotal(client, serial));
+    if (owed <= 0) return res.status(400).json({ message: "Nothing is owed to this client for that serial number." });
     if (qty > owed) return res.status(400).json({ message: `You only owe ${owed}. Enter ${owed} or less.` });
 
-    const latest = await SupplyLedger.findOne({ client, partNumber: part }).sort({ createdAt: -1 }).select("goodsSupplied");
+    const latest = await SupplyLedger.findOne({ client, serialNumber: serial }).sort({ createdAt: -1 }).select("goodsSupplied");
     const row = await SupplyLedger.create({
       client,
-      partNumber: part,
+      serialNumber: serial,
       goodsSupplied: latest?.goodsSupplied ?? "",
       qtyChange: qty,
       type: "settled",
@@ -271,7 +271,7 @@ router.post("/owed/repay", verifyToken, requireAdmin, async (req, res) => {
     // Two people repaying at once could both pass the check above. Check again
     // now that our row is saved: if the total went above zero we overpaid, so
     // take our row back out.
-    if ((await ledgerTotal(client, part)) > 0) {
+    if ((await ledgerTotal(client, serial)) > 0) {
       await SupplyLedger.deleteOne({ _id: row._id });
       return res.status(400).json({ message: "The owed amount just changed. Refresh and try again." });
     }
@@ -305,12 +305,11 @@ router.post(
     let qty = 0;
 
     try {
-      const { goodsSupplied, serialNumber, partNumber, quantity, supplyDate, clientId, takenFromClientId, transferNote } = req.body;
+      const { goodsSupplied, serialNumber, quantity, supplyDate, clientId, takenFromClientId, transferNote } = req.body;
       qty = Number(quantity);
       const normalizedSerial = String(serialNumber || "").trim();
-      const part = normalizePart(partNumber);
 
-      if (!String(goodsSupplied || "").trim() || !normalizedSerial || !part || !quantity || !supplyDate || !clientId) {
+      if (!String(goodsSupplied || "").trim() || !normalizedSerial || !quantity || !supplyDate || !clientId) {
         dropFiles();
         return res.status(400).json({ message: "All fields are required." });
       }
@@ -367,9 +366,6 @@ router.post(
       if (!storeItem) {
         throw new Error("No matching part was found in store for this serial number.");
       }
-      if (normalizePart(storeItem.partNumber) !== part) {
-        throw new Error(`Serial number ${storeItem.serialNumber} belongs to part ${normalizePart(storeItem.partNumber)}, not ${part}.`);
-      }
 
       const updatedItem = await StoreItem.findOneAndUpdate(
         { _id: storeItem._id, quantity: { $gte: qty } },
@@ -387,7 +383,7 @@ router.post(
       if (isTransfer) {
         ledgerRow = await SupplyLedger.create({
           client: takenFromReference,
-          partNumber: part,
+          serialNumber: normalizeSerial(storeItem.serialNumber),
           goodsSupplied: String(goodsSupplied).trim(),
           qtyChange: -qty,
           type: "borrowed_out",
@@ -401,7 +397,6 @@ router.post(
         _id: supplyId,
         goodsSupplied,
         serialNumber: normalizedSerial,
-        partNumber: part,
         quantity: qty,
         supplyDate,
         client: clientReference,

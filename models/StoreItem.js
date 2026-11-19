@@ -15,10 +15,12 @@ export const canonicalMachine = (value) => {
 const storeItemSchema = new mongoose.Schema(
   {
     serialNumber: { type: String, required: true, unique: true, trim: true },
-    // trim + uppercase so "pr-1001 " and "PR-1001" are the same part everywhere
+    // Optional. Trim + uppercase so "pr-1001 " and "PR-1001" are the same.
+    // Supply and the owed ledger identify a part by serialNumber, not this.
     partNumber: {
       type: String,
-      required: true,
+      required: false,
+      default: "",
       trim: true,
       set: (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
     },

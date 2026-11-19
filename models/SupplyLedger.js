@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 // ── SupplyLedger ──────────────────────────────────────────────────────────────
 // An append-only record of stock that was taken from one client's holding and
 // given to another. "Owed" is never stored as a number you edit. It is worked
-// out by adding up qtyChange for each (client, partNumber):
+// out by adding up qtyChange for each (client, serialNumber):
 //
 //   qtyChange < 0  -> stock was taken (we owe that client more)
 //   qtyChange > 0  -> stock was replaced or the supply entry was deleted
@@ -15,7 +15,8 @@ const SupplyLedgerSchema = new mongoose.Schema(
   {
     // the client who is OWED (the one the stock was taken FROM)
     client: { type: mongoose.Schema.Types.ObjectId, ref: "Client", required: true },
-    partNumber: {
+    // the store item's serial number, trimmed + uppercased
+    serialNumber: {
       type: String,
       required: true,
       trim: true,
@@ -32,7 +33,7 @@ const SupplyLedgerSchema = new mongoose.Schema(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-SupplyLedgerSchema.index({ client: 1, partNumber: 1 });
+SupplyLedgerSchema.index({ client: 1, serialNumber: 1 });
 SupplyLedgerSchema.index({ relatedSupply: 1 });
 
 export default mongoose.model("SupplyLedger", SupplyLedgerSchema);
