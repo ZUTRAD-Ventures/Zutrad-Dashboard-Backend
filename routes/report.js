@@ -35,6 +35,20 @@ const upload = multer({
   },
 });
 
+// Runs multer and turns its errors (file too large, blocked type, too many
+// files) into a clean 400 JSON response instead of a 500 HTML error page.
+const handleUpload = (req, res, next) => {
+  upload.array("files", 20)(req, res, (err) => {
+    if (!err) return next();
+    (req.files || []).forEach((f) => fs.unlink(f.path, () => {}));
+    const message =
+      err.code === "LIMIT_FILE_SIZE" ? "A file is larger than the 100 MB limit." :
+      err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE" ? "You can attach up to 20 files." :
+      err.message;
+    res.status(400).json({ message });
+  });
+};
+
 const populateReport = (query) =>
   query
     .populate("user", "firstName surname")
@@ -139,10 +153,10 @@ router.post(
   "/",
   verifyToken,
   requirePermission("reports"),
-  upload.array("files", 20),
+  handleUpload,
   async (req, res) => {
     try {
-      const { reportDetails, lineNumber, clientId, client, imagePaths } = req.body;
+      const { reportDetails, lineNumber, clientId, client } = req.body;
       const resolvedClientId = clientId ?? client;
 
       if (!reportDetails || !lineNumber || !resolvedClientId) {
@@ -161,7 +175,8 @@ router.post(
       const report = await Report.create({
         reportDetails,
         lineNumber: Number(lineNumber),
-        imagePaths: imagePaths || storedFiles.map((f) => f.storedName),
+        imagePaths: storedFiles.map((f) => f.storedName),
+        attachments: storedFiles,
         client: clientReference,
         user: req.userId,
       });
@@ -173,6 +188,31 @@ router.post(
     }
   }
 );
+
+// ── GET /reports/:id/files/:storedName -download one attachment ──────────
+// Any logged-in user can download (same visibility as GET /reports). The file
+// is looked up through the report so only files that belong to a report can be
+// served, and path.basename blocks any ../ tricks.
+router.get("/:id/files/:storedName", verifyToken, async (req, res) => {
+  try {
+    const reportId = getReportId(req);
+    if (!reportId || !mongoose.Types.ObjectId.isValid(reportId)) {
+      return res.status(400).json({ message: "Invalid report id." });
+    }
+    const storedName = path.basename(req.params.storedName);
+    const report = await Report.findOne({ _id: reportId, "attachments.storedName": storedName });
+    if (!report) return res.status(404).json({ message: "File not found." });
+
+    const meta = report.attachments.find((a) => a.storedName === storedName);
+    const filePath = path.join(UPLOAD_DIR, storedName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File is missing on the server." });
+
+    if (meta?.mimetype) res.type(meta.mimetype);
+    res.download(filePath, meta?.name || storedName);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // ── PATCH /reports/:id/approve -administrator or superadmin approves ─────
 router.patch("/:id/approve", verifyToken, requireAdmin, async (req, res) => {
@@ -225,6 +265,10 @@ router.delete("/:id", verifyToken, requireSuperAdmin, async (req, res) => {
 
     const report = await Report.findByIdAndDelete(reportId);
     if (!report) return res.status(404).json({ message: "Report not found." });
+    // remove the attached files from disk too
+    (report.attachments || []).forEach((a) =>
+      fs.unlink(path.join(UPLOAD_DIR, path.basename(a.storedName)), () => {})
+    );
     res.json({ message: "Report deleted." });
   } catch (err) {
     res.status(500).json({ message: err.message });

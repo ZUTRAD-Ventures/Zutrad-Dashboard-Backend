@@ -22,7 +22,12 @@ const SupplySchema = new mongoose.Schema(
   {
     goodsSupplied: { type: String, required: true, trim: true },
     serialNumber:  { type: String, required: true, trim: true },
-    partNumber:    { type: String, required: true, trim: true },
+    partNumber: {
+      type: String,
+      required: true,
+      trim: true,
+      set: (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
+    },
     quantity:      { type: Number, required: true, min: 1 },
     supplyDate:    { type: Date,   required: true },
     client: {
@@ -35,6 +40,14 @@ const SupplySchema = new mongoose.Schema(
       ref:  "StoreItem",
       default: null,
     },
+    // Set only when the stock came out of another client's holding. The owed
+    // amount itself lives in the SupplyLedger collection.
+    takenFrom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref:  "Client",
+      default: null,
+    },
+    transferNote: { type: String, trim: true, maxlength: 300, default: "" },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref:  "User",
@@ -45,4 +58,4 @@ const SupplySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.model("Supply", SupplySchema);
+export default mongoose.model("Supply", SupplySchema);

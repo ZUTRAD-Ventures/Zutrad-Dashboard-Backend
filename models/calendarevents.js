@@ -43,4 +43,4 @@ calendarEventSchema.methods.toEventObject = function () {
   };
 };
 
-export default mongoose.model("CalendarEvent", calendarEventSchema);
+export default mongoose.model("CalendarEvent", calendarEventSchema);

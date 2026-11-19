@@ -5,6 +5,18 @@ const reportSchema = new mongoose.Schema(
     reportDetails: { type: String, required: true, trim: true },
     lineNumber: { type: Number, required: true },
     imagePaths: { type: [String], default: [] },
+    attachments: {
+      type: [
+        {
+          name: { type: String, required: true },       // original file name
+          storedName: { type: String, required: true }, // name on disk
+          mimetype: { type: String, default: "" },
+          size: { type: Number, default: 0 },
+          _id: false,
+        },
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: ["pending", "approved", "rejected"],

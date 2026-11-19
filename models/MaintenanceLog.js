@@ -20,4 +20,4 @@ const maintenanceLogSchema = new mongoose.Schema(
 
 const MaintenanceLog = mongoose.models.MaintenanceLog || mongoose.model("MaintenanceLog", maintenanceLogSchema);
 
-export default MaintenanceLog;
+export default MaintenanceLog;

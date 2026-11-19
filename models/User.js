@@ -35,4 +35,4 @@ UserSchema.methods.toSafeObject = function () {
   return safe; // includes isApproved, isFirstLogin, role, permissions, settings, etc.
 };
 
-export default mongoose.model("User", UserSchema);
+export default mongoose.model("User", UserSchema);

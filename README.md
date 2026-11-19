@@ -8,7 +8,9 @@ Zutrad Backend is the Node.js/Express API for managing clients, maintenance logs
 - Client and machine management
 - Maintenance logging and completion tracking
 - Report submission, approval, rejection, and deletion
-- Store and supply management with file attachments
+- Store management, including bulk import from Excel / CSV
+- Supply management with file attachments, store stock deduction, and stock taken from another client (the "owed" ledger)
+- Schedules: tasks assigned by administrators, completed rows archived after 21 days
 - Calendar event management
 - MongoDB persistence with Mongoose
 
@@ -64,6 +66,8 @@ config/         Database connection setup
 middleware/     Auth middleware and access control
 models/         Mongoose schemas
 routes/         API route handlers
+utils/          Shared helpers
+jobs/           Background jobs (schedule archiver)
 seed.js         Seed data for development
 server.js       Application entry point
 ```
@@ -74,8 +78,9 @@ server.js       Application entry point
 - Clients: create, update, delete, and manage client machines
 - Maintenance: create and complete maintenance logs
 - Reports: submit and moderate reports
-- Store: manage stock items
-- Supply: create supply entries and upload files
+- Store: manage stock items, bulk import (`POST /store/bulk`)
+- Supply: create supply entries (reduces store stock by serial number), upload files, track and repay owed stock (`/supply/owed`, `/supply/owed/repay`)
+- Schedules: `/schedules` (administrators and superadmins only)
 - Calendar: manage calendar events
 
 ## Notes

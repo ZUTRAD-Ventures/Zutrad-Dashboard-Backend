@@ -9,11 +9,14 @@ import storeRoutes from "./routes/store.js";
 import reportRoutes from "./routes/report.js";
 import supplyRoutes from "./routes/supply.js";
 import calendarRoutes from "./routes/calendar.js";
+import scheduleRoutes from "./routes/schedule.js";
+import { startScheduleArchiver } from "./jobs/archiveSchedules.js";
 dotenv.config();
-connectDB();
+connectDB().then(startScheduleArchiver);
 const app = express();
 app.use(cors());
-app.use(express.json());
+// 1mb so a 500-row store import fits in one request
+app.use(express.json({ limit: "1mb" }));
 app.use("/auth", authRoutes);
 app.use("/clients", clientRoutes);
 app.use("/maintenance", maintenanceRoutes);
@@ -21,6 +24,7 @@ app.use("/store", storeRoutes);
 app.use("/reports", reportRoutes);
 app.use("/supply", supplyRoutes);
 app.use("/calendar", calendarRoutes);
+app.use("/schedules", scheduleRoutes);
 app.listen(process.env.PORT || 5000, () =>
   console.log(`Server running on port ${process.env.PORT || 5000}`)
-);
+);
