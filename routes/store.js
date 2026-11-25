@@ -71,7 +71,7 @@ router.post("/", verifyToken, requirePermission("store"), async (req, res) => {
 // ── POST /store/bulk -import many parts at once (Excel / CSV import) ─────────
 // Body: { items: [{ serialNumber, partNumber?, machinePart, machine, quantity, client? }] }
 // `partNumber` and `client` are optional: a client id or exact company name.
-// Max 500 items per request. If any entry is invalid or already exists, nothing
+// Superadmin only. Max 500 items per request. If any entry is invalid or already exists, nothing
 // is saved and the message names the entry. Declared before the /:id routes.
 // Does not touch the owed ledger: an administrator settles from the Store page.
 const cleanText = (value, max) => {
@@ -80,7 +80,7 @@ const cleanText = (value, max) => {
   return text && text.length <= max ? text : null;
 };
 
-router.post("/bulk", verifyToken, requirePermission("store"), async (req, res) => {
+router.post("/bulk", verifyToken, requireSuperAdmin, async (req, res) => {
   try {
     const { items } = req.body ?? {};
     if (!Array.isArray(items) || items.length === 0) {

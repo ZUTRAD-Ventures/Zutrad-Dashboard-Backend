@@ -1,0 +1,7 @@
+npm install
+npm run dev
+
+git status
+git fetch origin
+git merge origin/main
+git push origin Authur
