@@ -5,3 +5,7 @@ git status
 git fetch origin
 git merge origin/main
 git push origin Authur
+
+git add . 
+git commit -m "upload function"              
+git push -u origin Authur                                            
