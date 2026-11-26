@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import express from "express";
 import Client from "../models/Client.js";
-import { verifyToken, requireSuperAdmin } from "../middleware/auth.js";
+import { verifyToken, requireAdmin, requireSuperAdmin } from "../middleware/auth.js";
 import { MACHINE_TYPES, canonicalMachine } from "../models/StoreItem.js";
 import { exactCI, isObjectIdString } from "../utils/normalize.js";
 
@@ -274,6 +274,88 @@ router.post("/machines/bulk", verifyToken, requireBulkImporter, async (req, res)
   } catch (err) {
     if (err.name === "ValidationError") return res.status(400).json({ message: err.message });
     console.error("[clients POST /machines/bulk]", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── POST /clients/bulk -import many clients at once (Excel / CSV) ─────────────
+// Body: { items: [{ companyName, address }] }
+// Administrators and superadmins (the people who can open the Add Client
+// section). Max 500 items per request. If any entry is invalid, repeated inside
+// the request, or a client with that company name already exists
+// (case-insensitive), nothing is saved and the message names the entry.
+// Responds 201 { created: [<client>, ...] }.
+// No clash with GET/PUT/DELETE /:id: this is a POST on a fixed path.
+const collapseSpaces = (value) => String(value).replace(/\s+/g, " ").trim();
+
+router.post("/bulk", verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const { items } = req.body ?? {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ message: "items must be a non-empty array." });
+    }
+    if (items.length > 500) {
+      return res.status(400).json({ message: "A single import request can hold at most 500 items." });
+    }
+
+    const rows = [];
+    const seenNames = new Set();
+    for (let i = 0; i < items.length; i++) {
+      const label = `Entry ${i + 1}`;
+      const it = items[i];
+      if (!it || typeof it !== "object" || Array.isArray(it)) {
+        return res.status(400).json({ message: `${label}: must be an object.` });
+      }
+      const fail = (msg) => res.status(400).json({ message: `${label}: ${msg}` });
+
+      const companyName =
+        typeof it.companyName === "string" || typeof it.companyName === "number"
+          ? collapseSpaces(it.companyName)
+          : "";
+      if (!companyName || companyName.length > 200) return fail("company name is required (max 200 characters).");
+
+      const address =
+        typeof it.address === "string" || typeof it.address === "number"
+          ? collapseSpaces(it.address)
+          : "";
+      if (!address || address.length > 300) return fail("address is required (max 300 characters).");
+
+      const key = companyName.toLowerCase();
+      if (seenNames.has(key)) return fail(`company "${companyName}" appears more than once in this import.`);
+      seenNames.add(key);
+
+      rows.push({ companyName, address });
+    }
+
+    // company names must be unique across all clients (case-insensitive), because
+    // the machine and store imports look clients up by name
+    const existing = await Client.find({ companyName: { $in: rows.map((r) => r.companyName) } })
+      .collation({ locale: "en", strength: 2 })
+      .select("companyName");
+    if (existing.length) {
+      const taken = new Set(existing.map((c) => collapseSpaces(c.companyName).toLowerCase()));
+      const index = rows.findIndex((r) => taken.has(r.companyName.toLowerCase()));
+      if (index !== -1) {
+        return res.status(409).json({
+          message: `Entry ${index + 1}: a client named "${rows[index].companyName}" already exists.`,
+        });
+      }
+    }
+
+    // insertMany validates every document before writing; ordered:true stops at
+    // the first failure
+    try {
+      const created = await Client.insertMany(rows, { ordered: true });
+      res.status(201).json({ created });
+    } catch (err) {
+      // Remove anything this request managed to insert so the chunk stays all-or-nothing.
+      const insertedIds = Object.values(err.insertedIds || {});
+      if (insertedIds.length) await Client.deleteMany({ _id: { $in: insertedIds } }).catch(() => {});
+      if (err.name === "ValidationError") return res.status(400).json({ message: err.message });
+      throw err;
+    }
+  } catch (err) {
+    console.error("[clients POST /bulk]", err);
     res.status(500).json({ message: err.message });
   }
 });
